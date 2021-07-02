@@ -1,0 +1,27 @@
+
+.tl-media {
+    font-size: 16px;
+    border-right: 1px solid lightgrey;
+}
+
+.tl-timeline p {
+    color: black;
+}
+img.wikiImage{
+    border: 1px solid black;
+    max-height:45vh;
+    max-width: 90vh;
+}
+
+.wiki-table {
+/*     border: 1px solid black; */
+}
+
+.wiki-th {
+    text-align: right;
+    background-color: aliceblue;
+    padding-left: .4em;
+    padding-right: .4em;
+    /* align-content: end; */
+    vertical-align: top;
+}

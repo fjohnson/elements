@@ -1,0 +1,87 @@
+Properties of interest:
+! Name ?name 
+! Symbol ?symbol
+! Atomic Number ?anum
+Intro Blurb (limit to x chars?)
+Appearance
+History 
+ - inventor
+ - inventor picture
+ - inventor blurb
+Groupings? 
+ - see: https://en.wikipedia.org/wiki/Periodic_table#Categories
+Image ?picture
+Wikipedia Link 
+Commons Gallery ?commons
+
+1. Get Element Data
+2. Group?
+3. Transform into JSON format applicable for timeline js
+4. Add styling
+
+https://www.mediawiki.org/wiki/Wikidata_Query_Service/User_Manual#SPARQL_endpoint 
+https://query.wikidata.org/sparql <--- end point
+GET add param query=(sparql query)
+POST query=(sparql query) 
+SELECT *
+WHERE {
+    ?element wdt:P31 wd:Q11344;
+             wdt:P246 ?esymbol;
+             schema:description ?itemdesc.
+    optional { ?element rdfs:label ?elabel FILTER (LANG(?elabel) = "en").}
+    optional { ?element wdt:P575 ?date. }
+    optional { ?element wdt:P61  ?inventor. 
+               optional { ?inventor wdt:P18 ?ipicture. }
+               ?inventor schema:description ?inventordesc 
+               FILTER(LANG(?inventordesc) = "en").
+             }
+    optional { ?element wdt:P1086 ?anum.}
+    optional { ?element wdt:P935 ?commons.}
+    optional { ?element wdt:P18 ?epicture. }
+  
+    SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }
+  FILTER(LANG(?itemdesc) = "en")
+}
+
+#Get link between wikidata entity and the wikipedia page (More importantly, get the title so we can extract text)
+https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q1128&props=sitelinks/urls&languages=en&sitefilter=enwiki&formatversion=2
+https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q1128&props=sitelinks%2Furls&languages=en&sitefilter=enwiki&format=json
+
+Extract text from Wikipedia page
+https://www.mediawiki.org/wiki/Extension:TextExtracts
+https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&exlimit=2&titles=Calcium&explaintext=1&formatversion=2&exchars=255
+
+
+###Code to make a CORS request
+var apiEndpoint = "https://en.wikipedia.org/w/api.php";
+var params = "action=query&prop=extracts&exintro=true&exlimit=2&titles=Calcium&explaintext=1&formatversion=2&exchars=255&format=json";
+
+/**
+ * Send the request to get the images
+ */
+fetch(apiEndpoint + "?" + params + "&origin=*")
+    .then(function(response){return response.json();})
+    .then(function(response) {
+          
+          console.log(response);
+     });
+
+
+
+     //console.log('okay');
+// var apiEndpoint = "https://query.wikidata.org/sparql";
+// var params = "query=";
+// var query = 'SELECT ?item ?itemLabel WHERE {?item wdt:P31 wd:Q146. SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }}';
+// var encodedURI = encodeURI(apiEndpoint + "?" + params + query);
+// console.log('okay');
+// console.log(encodedURI);
+
+/**
+ * Send the request to get the images + "&origin=*"
+ */
+// fetch()
+//     .then(function(response){return response.json();})
+//     .then(function(response) {
+          
+//           console.log(response);
+//      });
