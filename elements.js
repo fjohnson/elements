@@ -7,24 +7,31 @@ function querySparql(){
   var params = "origin=*&format=json&query=";
   var query = `
 SELECT ?element ?elementLabel ?esymbol ?anum ?dateOfDiscovery  
+        ?density ?bpAmount ?bpUnitLabel
         ?inventor ?inventorLabel ?inventordesc
         ?commons ?picture 
 WHERE {
     ?element wdt:P31 wd:Q11344;
              wdt:P246 ?esymbol;
+             wdt:P1086 ?anum.
+    
     optional { ?element wdt:P575 ?dateOfDiscovery. }
     optional { ?element wdt:P61  ?inventor. 
                ?inventor schema:description ?inventordesc FILTER(LANG(?inventordesc) = "en").  
              }
-    optional { ?element wdt:P1086 ?anum.}
     optional { ?element wdt:P935 ?commons.}
     optional { ?element wdt:P18 ?picture. }
-  
+    optional { ?element wdt:P2054 ?density.}
+    
+    optional {?element p:P2102 ?boilingPoint.
+              ?boilingPoint psv:P2102 ?bpv. 
+              ?bpv wikibase:quantityAmount ?bpAmount.
+              ?bpv wikibase:quantityUnit ?bpUnit.}
+
     SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }
     FILTER (?anum <= 118) #Elements over this are currently only theoretical
 }
-LIMIT 30
-`;
+LIMIT 30`;
   
   const options = {
       method: 'POST',
@@ -172,7 +179,7 @@ async function transformToTLJson(){
     var summaryText = `${wikiElement.summary}`
     slide.text = {
                    headline: ` <a href="https://en.wikipedia.org/wiki/${wikiElement.wikiurl}">${wikiElement.elementLabel}</a>`,
-                   text: createTable(wikiElement)
+                   text: createTable(selectTableData(wikiElement))
                  };
 
     slide.media = {
@@ -180,6 +187,7 @@ async function transformToTLJson(){
       thumbnail: wikiElement.picture
     };
     slide.unique_id = "a"+wikiElement.anum;
+    slide.autolink = false;
     return slide;
   }
 
@@ -190,6 +198,46 @@ async function transformToTLJson(){
   return timelineJson;
 }
 
+function selectTableData(wikiElement){
+  var tableData = {
+    'Symbol': wikiElement.esymbol,
+    'Atomic Number': wikiElement.anum,
+    //'Followed by':'x',
+    //'Part of':'x',
+  }
+
+  if(wikiElement.bpAmount && wikiElement.bpUnitLabel){
+    
+    if (wikiElement.bpUnitLabel == 'degree Celsius'){
+      tableData['Boiling Point'] = wikiElement.bpAmount + ' ' + 'C';
+    }
+    else if(wikiElement.bpUnitLabel == 'degree Fahrenheit'){
+      tableData['Boiling Point'] = wikiElement.bpAmount + ' ' + 'F';
+    }
+    else{
+      tableData['Boiling Point'] = wikiElement.bpAmount + ' ' + wikiElement.bpUnitLabel;
+    }
+    
+  }
+
+  if(wikiElement.density){
+    tableData['Density'] = wikiElement.density;
+  }
+
+  if(wikiElement.inventorLabel){
+    tableData['Discoverer'] = wikiElement.inventor;
+    tableData['_Discoverer'] = wikiElement.inventorLabel;
+    tableData['Discoverer details'] = wikiElement.inventordesc;
+  }
+
+  tableData['Wikipedia'] = "https://en.wikipedia.org/wiki/" + wikiElement.wikiurl;
+  tableData['Wikidata'] = wikiElement.element;
+  if(wikiElement.commons){
+    tableData['Wikicommons'] = 'https://commons.wikimedia.org/wiki/'+ wikiElement.commons;
+  }
+  
+  return tableData;
+}
 function addImages(events){
 
   events.forEach(function(event){
@@ -201,10 +249,16 @@ function addImages(events){
     var anum = event.unique_id;
     var selector = `#${anum} > div.tl-slide-scrollable-container > div > div > div.tl-media`;  
     var insertionPoint = document.querySelector(selector);
+    var link = document.createElement("a");
+    link.setAttribute("href", event.media.thumbnail);
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel","no referrer noopener");
+
     var img = document.createElement("img");
     img.setAttribute("class", "wikiImage");
     img.setAttribute("src", event.media.thumbnail);
-    insertionPoint.appendChild(img);
+    link.appendChild(img);
+    insertionPoint.appendChild(link);
     
   });
 }
@@ -231,6 +285,14 @@ function createTable(tableObj){
   table.setAttribute("class", "wiki-table");
   table.appendChild(tbody);
   
+  if(tableObj['_Discoverer']){
+    var discovererLabel = tableObj['_Discoverer'];
+    delete tableObj['_Discoverer'];
+  }
+  else{
+    var discovererLabel = null;
+  }
+  
   Object.keys(tableObj).forEach(function(header){
     var rowContents = tableObj[header];
     var th = document.createElement("th");
@@ -240,7 +302,24 @@ function createTable(tableObj){
     th.setAttribute("class", "wiki-th");
     td.setAttribute("class", "wiki-td");
     th.appendChild(document.createTextNode(header));
-    td.appendChild(document.createTextNode(rowContents));
+    
+    if(header == 'Wikipedia' || header == 'Wikidata' || header == 'Wikicommons' || header == 'Discoverer'){
+      let link = document.createElement("a");
+      link.setAttribute('href', rowContents);
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel","no referrer noopener");  
+      if(header == 'Discoverer'){
+        link.appendChild(document.createTextNode(discovererLabel));
+      }
+      else{
+        link.appendChild(document.createTextNode(rowContents));
+      }
+      td.appendChild(link);
+    }
+    else{
+      td.appendChild(document.createTextNode(rowContents));
+    }
+
     tr.appendChild(th);
     tr.appendChild(td);
     tbody.appendChild(tr);
