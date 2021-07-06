@@ -1,13 +1,9 @@
 var sparqlEndpoint = "https://query.wikidata.org/sparql";
 var wikidataEndpoint = "https://www.wikidata.org/w/api.php?"
 var wikipediaEndpoint = "https://en.wikipedia.org/w/api.php?"
-
-//Query the wikidata sparql endpoint for data on chemical elements
-function querySparql(){
-  var params = "origin=*&format=json&query=";
-  var query = `
+var getElementsQuery = `
 SELECT ?element ?elementLabel ?esymbol ?anum ?dateOfDiscovery  
-        ?density ?bpAmount ?bpUnitLabel
+        ?densityUnitLabel ?densityAmount ?bpAmount ?bpUnitLabel ?massUnitLabel ?massAmount
         ?inventor ?inventorLabel ?inventordesc
         ?commons ?picture 
 WHERE {
@@ -19,20 +15,22 @@ WHERE {
     optional { ?element wdt:P61  ?inventor. 
                ?inventor schema:description ?inventordesc FILTER(LANG(?inventordesc) = "en").  
              }
-    optional { ?element wdt:P935 ?commons.}
-    optional { ?element wdt:P18 ?picture. }
-    optional { ?element wdt:P2054 ?density.}
-    
-    optional {?element p:P2102 ?boilingPoint.
-              ?boilingPoint psv:P2102 ?bpv. 
-              ?bpv wikibase:quantityAmount ?bpAmount.
-              ?bpv wikibase:quantityUnit ?bpUnit.}
-
+    optional {?element wdt:P935 ?commons.}
+    optional {?element wdt:P18 ?picture. }
+    optional {?element p:P2102/psv:P2102 [wikibase:quantityAmount ?bpAmount; wikibase:quantityUnit ?bpUnit].}
+    optional {?element p:P2054/psv:P2054 [wikibase:quantityUnit ?densityUnit; wikibase:quantityAmount ?densityAmount].}
+    optional {?element p:P2067/psv:P2067 [wikibase:quantityUnit ?massUnit; wikibase:quantityAmount ?massAmount].}
+   
     SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }
     FILTER (?anum <= 118) #Elements over this are currently only theoretical
 }
-LIMIT 30`;
-  
+LIMIT 30
+`;
+
+//Query the wikidata sparql endpoint 
+function querySparql(query,parseFunction){
+  var params = "origin=*&format=json&query=";
+
   const options = {
       method: 'POST',
       body: encodeURI(params+query),
@@ -49,28 +47,35 @@ LIMIT 30`;
         return response.json();
     })
     .then(function(response) {
-          return parseElements(response);
+          return parseFunction(response);
      })
     .catch(error=>{
       console.log(error);
     });
 }
 
-function parseElements(sparql_json){
-  var queryVars = sparql_json.head.vars;
-  var json_elements = sparql_json.results.bindings;
-  var elements = {}; 
+//Return a query to retrieve period, group, and electron configuration information
+function genPartOfAndElectronConfQuery(elements){
+  var elementQIDs = [];
+  
+  for(let element of Object.values(elements)){
+    let elementQID = element.element.match(/(Q\d+)$/)[1];
+    elementQIDs.push('wd:'+elementQID);  
+  }
 
-  json_elements.forEach(function(e){
-    var new_element = {};
-    queryVars.forEach(function(v){
-      if (e[v]){
-        new_element[v] = e[v].value;
-      }
-    });
-    elements[new_element.anum]=new_element;
-  })
-  return elements;
+  var elementSet = elementQIDs.join(',');
+  var query = `
+  SELECT ?element ?anum ?pofLabel ?electronConfig
+  WHERE {
+      ?element wdt:P31 wd:Q11344;
+               wdt:P361 ?pof;
+               wdt:P8000 ?electronConfig;
+               wdt:P1086 ?anum.
+  
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }
+      FILTER (?element in (${elementSet}))
+  }`;
+  return query;
 }
 
 //Get the title and URL of the wikipedia page corresponding to the wikidata element QID
@@ -90,7 +95,6 @@ function getTitle(elements, anum){
     var enwikiData = response.entities[elementQID].sitelinks.enwiki;
     elements[anum].wikiurl = enwikiData.title;
     elements[anum].wikititle = enwikiData.title;
-    return elements[anum];
   })
   .catch(error => {
     elements[anum].wikiurl = null;
@@ -99,40 +103,54 @@ function getTitle(elements, anum){
   });
 }
 
-//See: https://www.mediawiki.org/wiki/Extension:TextExtracts
-function getSummaryText(title){
-  var params = `origin=*&action=query&prop=extracts&exintro=true&exlimit=2&titles=${title}&explaintext=1&formatversion=2&exchars=1024&format=json`;
-  var requestURL = encodeURI(wikipediaEndpoint+params);   
-  
-  return fetch(requestURL)
-  .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-    return response.json();
-  })
-  .then(response => {
-    return response.query.pages[0].extract;
-  })
-}
-
 //Get data by querying wikidata and wikipedia 
 async function getData(){
-  var eset = await querySparql();  
-  var promises = [];
-  
-  for (var anum in eset){
-   var promise = getTitle(eset, anum)
-   .then(element => {
-     return getSummaryText(element.wikititle)
-     .then(summary => {element.summary = summary;})
-     .catch(error => {
-       element.summary = null;
-       console.error(error);
-     });
-    });
+
+  function parseElements(sparql_json){
+    var queryVars = sparql_json.head.vars;
+    var json_elements = sparql_json.results.bindings;
+    var elements = {}; 
+
+    json_elements.forEach(function(e){
+      var new_element = {};
+      queryVars.forEach(function(v){
+        if (e[v]){
+          new_element[v] = e[v].value;
+        }
+      });
+      elements[new_element.anum]=new_element;
+    })
+    return elements;
+  }
+
+  var eset = await querySparql(getElementsQuery, parseElements);
+
+  function parsePeriodAndElectronConf(sparql_json){
+
+    for(let sparqlElement of sparql_json.results.bindings){
+      let anum = sparqlElement.anum.value;
+      let partOf = sparqlElement.pofLabel.value;
+      let electronConf = sparqlElement.electronConfig.value;
+
+      if(eset[anum].electronConfig === undefined){
+        eset[anum].electronConfig = new Set();
+      }
+      eset[anum].electronConfig.add(electronConf);
+
+      if(eset[anum].partOf === undefined){
+        eset[anum].partOf = new Set();
+      }
+      eset[anum].partOf.add(partOf);
+    }
     
-   promises.push(promise);
+  };
+
+  var result = querySparql(genPartOfAndElectronConfQuery(eset), parsePeriodAndElectronConf);
+
+  var promises = [result];
+  for (var anum in eset){
+    var promise = getTitle(eset, anum)
+    promises.push(promise);
   }
   
   await Promise.all(promises);
@@ -171,16 +189,11 @@ async function transformToTLJson(){
       slide.start_date.display_date = "Unknown discovery date";
     }
 
-//     if (wikiElement.inventorLabel){
 
-//     }
-    
-    //wikiElement.picture may be undefined.
-    var summaryText = `${wikiElement.summary}`
     slide.text = {
-                   headline: ` <a href="https://en.wikipedia.org/wiki/${wikiElement.wikiurl}">${wikiElement.elementLabel}</a>`,
-                   text: createTable(selectTableData(wikiElement))
-                 };
+      headline: ` <a href="https://en.wikipedia.org/wiki/${wikiElement.wikiurl}">${wikiElement.elementLabel}</a>`,
+      text: createTable(selectTableData(wikiElement))
+    };
 
     slide.media = {
       url: "https://en.wikipedia.org/wiki/" + wikiElement.wikiurl,
@@ -206,6 +219,19 @@ function selectTableData(wikiElement){
     //'Part of':'x',
   }
 
+  if(wikiElement.partOf && wikiElement.partOf.size){
+    tableData['Part Of'] = Array.from(wikiElement.partOf).join(', ');  
+  }
+
+  if(wikiElement.electronConfig && wikiElement.electronConfig.size){
+    for(let econf of wikiElement.electronConfig){
+      //Skip over electron configuration defined as e.g. [He] 2s¹
+      if(!econf.startsWith('[')){
+        tableData['Electron Configuration'] = econf;
+      }
+    }
+  }
+
   if(wikiElement.bpAmount && wikiElement.bpUnitLabel){
     
     if (wikiElement.bpUnitLabel == 'degree Celsius'){
@@ -220,12 +246,21 @@ function selectTableData(wikiElement){
     
   }
 
-  if(wikiElement.density){
-    tableData['Density'] = wikiElement.density;
+  if(wikiElement.densityUnitLabel && wikiElement.densityAmount){
+    tableData['Density'] = wikiElement.densityAmount + ' ' + wikiElement.densityUnitLabel;
+  }
+
+  if(wikiElement.massUnitLabel && wikiElement.massAmount){
+    if(wikiElement.massUnitLabel != '1'){
+      tableData['Mass'] = wikiElement.massAmount + ' ' + wikiElement.massUnitLabel;
+    }
+    else{
+      tableData['Mass'] = wikiElement.massAmount;
+    }
   }
 
   if(wikiElement.inventorLabel){
-    tableData['Discoverer'] = wikiElement.inventor;
+    tableData['Discovered by'] = wikiElement.inventor;
     tableData['_Discoverer'] = wikiElement.inventorLabel;
     tableData['Discoverer details'] = wikiElement.inventordesc;
   }
@@ -292,7 +327,7 @@ function createTable(tableObj){
   else{
     var discovererLabel = null;
   }
-  
+
   Object.keys(tableObj).forEach(function(header){
     var rowContents = tableObj[header];
     var th = document.createElement("th");
@@ -303,12 +338,12 @@ function createTable(tableObj){
     td.setAttribute("class", "wiki-td");
     th.appendChild(document.createTextNode(header));
     
-    if(header == 'Wikipedia' || header == 'Wikidata' || header == 'Wikicommons' || header == 'Discoverer'){
+    if(header == 'Wikipedia' || header == 'Wikidata' || header == 'Wikicommons' || header == 'Discovered by'){
       let link = document.createElement("a");
       link.setAttribute('href', rowContents);
       link.setAttribute("target", "_blank");
       link.setAttribute("rel","no referrer noopener");  
-      if(header == 'Discoverer'){
+      if(header == 'Discovered by'){
         link.appendChild(document.createTextNode(discovererLabel));
       }
       else{
@@ -334,31 +369,6 @@ async function ar(){
     timeline.on('loaded', function(...vars){
       addImages(result.events);
     });
-
-// var anum = vars[0].events[0].unique_id;            
-// var parent = document.querySelector(`#${anum} div.tl-text-content-container`);
-// var a = parent.childNodes[0].cloneNode(true); //doi
-// var b = parent.childNodes[1].cloneNode(true); //name
-// var c = parent.childNodes[2].cloneNode(true); //text
-
-// var addText = document.createElement("p");
-// addText.appendChild(document.createTextNode("Greetings"));
-// c.appendChild(addText);
-// parent.replaceChildren(b,a,c);
-
-
-
-
-// var h2t = document.querySelector('#a1 div.tl-text-content-container h2');
-// var h3t = document.querySelector('#a1 div.tl-text-content-container h3');
-// var pchild = parent.children;
-// pchild[0] = h2t;
-// pchild[1] = h3t;
-// parent.replaceChildren(pchild);
-
-//             h3t.textContent = "test";
-
-
 }
 ar();
 
