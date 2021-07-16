@@ -1,10 +1,11 @@
+var wikipediaUrl = "https://en.wikipedia.org/wiki/";
 var sparqlEndpoint = "https://query.wikidata.org/sparql";
-var wikidataEndpoint = "https://www.wikidata.org/w/api.php?"
-var wikipediaEndpoint = "https://en.wikipedia.org/w/api.php?"
+var wikidataEndpoint = "https://www.wikidata.org/w/api.php?";
+var wikipediaEndpoint = "https://en.wikipedia.org/w/api.php?";
 var getElementsQuery = `
 SELECT ?element ?elementLabel ?esymbol ?anum ?dateOfDiscovery  
         ?densityUnitLabel ?densityAmount ?bpAmount ?bpUnitLabel ?massUnitLabel ?massAmount
-        ?inventor ?inventorLabel ?inventordesc
+        ?inventor ?inventorLabel ?inventordesc ?locationOfDiscoveryLabel
         ?commons ?picture 
 WHERE {
     ?element wdt:P31 wd:Q11344;
@@ -12,6 +13,7 @@ WHERE {
              wdt:P1086 ?anum.
     
     optional { ?element wdt:P575 ?dateOfDiscovery. }
+    optional { ?element wdt:P189 ?locationOfDiscovery}
     optional { ?element wdt:P61  ?inventor. 
                ?inventor schema:description ?inventordesc FILTER(LANG(?inventordesc) = "en").  
              }
@@ -23,8 +25,9 @@ WHERE {
    
     SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }
     FILTER (?anum <= 118) #Elements over this are currently only theoretical
+    #FILTER (?anum = 26) #Elements over this are currently only theoretical
 }
-LIMIT 30
+
 `;
 
 //Query the wikidata sparql endpoint 
@@ -78,10 +81,10 @@ function genPartOfAndElectronConfQuery(elements){
   return query;
 }
 
-//Get the title and URL of the wikipedia page corresponding to the wikidata element QID
-function getTitle(elements, anum){
-  var elementQID = elements[anum].element.match(/(Q\d+)$/)[1];
-  var params = `origin=*&action=wbgetentities&ids=${elementQID}&props=sitelinks/urls&languages=en&sitefilter=enwiki&exsectionformat=plain&formatversion=2&format=json`;
+//Get the URL of the wikipedia page corresponding to the wikidata element QID
+function getWikiPage(elements, anum, key){
+  var QID = elements[anum][key].match(/(Q\d+)$/)[1];
+  var params = `origin=*&action=wbgetentities&ids=${QID}&props=sitelinks/urls&languages=en&sitefilter=enwiki&exsectionformat=plain&formatversion=2&format=json`;
   var requestURL = encodeURI(wikidataEndpoint+params);
 
   return fetch(requestURL)
@@ -92,13 +95,11 @@ function getTitle(elements, anum){
     return response.json();
   })
   .then(function(response){
-    var enwikiData = response.entities[elementQID].sitelinks.enwiki;
-    elements[anum].wikiurl = enwikiData.title;
-    elements[anum].wikititle = enwikiData.title;
+    var enwikiData = response.entities[QID].sitelinks.enwiki;
+    elements[anum][key+"WikiUrl"] = encodeURI(wikipediaUrl + enwikiData.title);
   })
   .catch(error => {
-    elements[anum].wikiurl = null;
-    elements[anum].wikititle = null;
+    elements[anum][key+"WikiUrl"] = null;
     Promise.reject(error); //Equivalent to rethrowing the error
   });
 }
@@ -149,8 +150,10 @@ async function getData(){
 
   var promises = [result];
   for (var anum in eset){
-    var promise = getTitle(eset, anum)
-    promises.push(promise);
+    promises.push(getWikiPage(eset, anum, "element"));
+    if(eset[anum].inventor){
+      promises.push(getWikiPage(eset, anum, "inventor"));
+    }
   }
   
   await Promise.all(promises);
@@ -183,20 +186,33 @@ async function transformToTLJson(){
     var slide = {};
 
     if (wikiElement.dateOfDiscovery){
-      slide.start_date = parseDate(wikiElement.dateOfDiscovery);
-    }else{
+      if(wikiElement.dateOfDiscovery.startsWith('-')){
+        let year = wikiElement.dateOfDiscovery.match(/(-\d+)-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/);
+        if(year){
+          slide.start_date = {year: year[1]};
+        }
+        else{
+          slide.start_date = parseDate("0000-00-00T:00:00:00Z");
+          slide.start_date.display_date = "Unknown discovery date";
+        } 
+      }
+      else{
+        slide.start_date = parseDate(wikiElement.dateOfDiscovery);
+      }
+    }
+    else{
       slide.start_date = parseDate("0000-00-00T:00:00:00Z");
       slide.start_date.display_date = "Unknown discovery date";
     }
 
 
     slide.text = {
-      headline: ` <a href="https://en.wikipedia.org/wiki/${wikiElement.wikiurl}">${wikiElement.elementLabel}</a>`,
+      headline: ` <a href="${wikiElement.elementWikiUrl}">${wikiElement.elementLabel}</a>`,
       text: createTable(selectTableData(wikiElement))
     };
 
     slide.media = {
-      url: "https://en.wikipedia.org/wiki/" + wikiElement.wikiurl,
+      url: wikiElement.elementWikiUrl,
       thumbnail: wikiElement.picture
     };
     slide.unique_id = "a"+wikiElement.anum;
@@ -215,8 +231,6 @@ function selectTableData(wikiElement){
   var tableData = {
     'Symbol': wikiElement.esymbol,
     'Atomic Number': wikiElement.anum,
-    //'Followed by':'x',
-    //'Part of':'x',
   }
 
   if(wikiElement.partOf && wikiElement.partOf.size){
@@ -260,12 +274,15 @@ function selectTableData(wikiElement){
   }
 
   if(wikiElement.inventorLabel){
-    tableData['Discovered by'] = wikiElement.inventor;
+    tableData['Discovered by'] = wikiElement.inventorWikiUrl;
     tableData['_Discoverer'] = wikiElement.inventorLabel;
     tableData['Discoverer details'] = wikiElement.inventordesc;
+    if(wikiElement.locationOfDiscoveryLabel){
+      tableData['Discovered in'] = wikiElement.locationOfDiscoveryLabel;
+    }
   }
 
-  tableData['Wikipedia'] = "https://en.wikipedia.org/wiki/" + wikiElement.wikiurl;
+  tableData['Wikipedia'] = wikiElement.elementWikiUrl;
   tableData['Wikidata'] = wikiElement.element;
   if(wikiElement.commons){
     tableData['Wikicommons'] = 'https://commons.wikimedia.org/wiki/'+ wikiElement.commons;
@@ -364,8 +381,8 @@ function createTable(tableObj){
 
 async function ar(){
     var result = await transformToTLJson();
-
-    var timeline = new TL.Timeline('timeline-embed', result);
+    var options = {initial_zoom: 10, timenav_height_percentage: 20}
+    var timeline = new TL.Timeline('timeline-embed', result, options);
     timeline.on('loaded', function(...vars){
       addImages(result.events);
     });
