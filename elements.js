@@ -416,15 +416,32 @@ function createTable(tableObj) {
     return table.outerHTML;
 }
 
-function addImages(events) {
+//var radioactiveElements = [43,61,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118];
 
-    events.forEach(function(event) {
+async function ar() {
+    var result = await transformToTLJson();
+    var options = {
+        //initial_zoom: 10,
+        timenav_height_percentage: 20,
+        //start_at_slide: 21
+    }
+    var timeline = new TL.Timeline('timeline-embed',result,options);
+
+    function addImage(event) {
+
         //Not all elements have images
         if (!event.media.thumbnail) {
             return;
         }
 
         var anum = event.unique_id;
+        var existing = document.querySelector(`#${anum} > div.tl-slide-scrollable-container > div > div > div.tl-media > a[href="${event.media.thumbnail}"]`);
+
+        //slide has already been viewed and the image has been loaded
+        if(existing){
+            return;
+        }
+
         var selector = `#${anum} > div.tl-slide-scrollable-container > div > div > div.tl-media`;
         var insertionPoint = document.querySelector(selector);
         var link = document.createElement("a");
@@ -437,23 +454,10 @@ function addImages(events) {
         img.setAttribute("src", event.media.thumbnail);
         link.appendChild(img);
         insertionPoint.appendChild(link);
-
-    });
-}
-
-//var radioactiveElements = [43,61,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118];
-
-async function ar() {
-    var result = await transformToTLJson();
-    var options = {
-        //initial_zoom: 10,
-        timenav_height_percentage: 20,
-        //start_at_slide: 21
     }
-    var timeline = new TL.Timeline('timeline-embed',result,options);
-
-    timeline.on('loaded', function(...vars) {
-        addImages(result.events);
-    });
+    
+    timeline.on('change', function(changeEventObj){
+        addImage(timeline.getDataById(changeEventObj.unique_id));
+    })
 }
 ar();
