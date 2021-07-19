@@ -1,5 +1,4 @@
-# Elements
- A chemical element discovery timeline visualizer.
+A chemical element discovery timeline visualizer.
  
 This project uses Knight Lab's [TimelineJS](https://timeline.knightlab.com/docs/index.html) to build a timeline of the discovery of the chemical elements. Information is dynamically taken from Wikipedia, Wikidata, and Wikicommons to build the visualization.
 
@@ -15,6 +14,6 @@ Try it out here using the following example timelines:
 
 [Elements with atomic numbers 1-20](https://fjohnson.github.io/elements/elements.html?atomicnumbers=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20)
 
-Or try out your own with the url https://fjohnson.github.io/elements/elements.html?atomicnumbers= and by adding the atomic numbers you would like to see in your timeline. Thus, https://fjohnson.github.io/elements/elements.html?atomicnumbers=1,2,3,4,5 would give you a timeline composed of the elements with atomic numbers between 1-5. 
+Or try out your own with the url https://fjohnson.github.io/elements/elements.html?atomicnumbers= and by adding the atomic numbers you would like to see in your timeline. Thus, [https://fjohnson.github.io/elements/elements.html?atomicnumbers=1,2,3,4,5](https://fjohnson.github.io/elements/elements.html?atomicnumbers=1,2,3,4,5) would give you a timeline composed of the elements with atomic numbers between 1-5. 
 
 
